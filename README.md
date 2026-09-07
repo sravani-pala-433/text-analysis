@@ -78,25 +78,45 @@ The supported setup splits the app in two:
 
 | Component | Host | What it runs |
 |---|---|---|
-| Backend (FastAPI + ML) | **Render** (or Railway / Fly.io) | Docker image from `Dockerfile` |
+| Backend (FastAPI + ML) | A Docker host (HF Spaces / Render / Railway / Fly.io) | Docker image from `Dockerfile` |
 | Frontend (`static/`) | **Vercel** | Static Vite build |
 
-### Backend → Render
+The `Dockerfile` now starts uvicorn on `$PORT` (default `7000`), so any
+platform that injects a `PORT` variable works.
 
-1. Push the repo to GitHub (make sure `static/`, `package.json`, and `render.yaml` are committed — `.gitignore` no longer excludes them).
-2. In Render → New → Blueprint, point it at the repo. It uses `render.yaml` (Docker runtime, 5GB disk mounted at `/var/data` for uploads/model cache).
-3. Set these env vars in the Render dashboard:
-   - `DATABASE_URL` (Postgres with the `pgvector` extension — e.g. Neon)
+### Backend → Hugging Face Spaces (free, no card)
+
+1. Create a Space at https://huggingface.co/new-space configured with **Docker** as the SDK.
+2. Connect the Space's repository to your code (you can push the backend files directly to the Space's git repo, or fork/upload the project).
+3. Set the Space secrets (Settings → Variables and secrets):
+   - `DATABASE_URL` (Postgres with the `pgvector` extension — e.g. Neon free tier)
    - `SECRET_KEY`
-4. Note the service URL, e.g. `https://textualize-backend.onrender.com`.
+   - `UPLOAD_FILE_DIR=/data`
+4. Deploy. HF builds the `Dockerfile` and exposes `https://<username>-<space-name>.hf.space/api/docs`.
+5. The first request after a cold start downloads the embedding model (~90 MB) and can be slow to wake the Space.
+
+### Backend → Render (paid, easier)
+
+1. Push the repo to GitHub.
+2. Render → New → Blueprint → point at the repo (uses `render.yaml`, Docker runtime, 5 GB disk at `/var/data`).
+3. Set `DATABASE_URL`, `SECRET_KEY` (and `UPLOAD_FILE_DIR=/var/data`) in the dashboard.
+
+### Backend → your own machine + tunnel (zero-cost, quickest)
+
+If you just need a public URL for a demo, run the backend locally and expose it:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000
+cloudflared tunnel --url http://localhost:8000   # gives a https://...trycloudflare.com URL
+```
 
 ### Frontend → Vercel
 
 1. In Vercel, import the same GitHub repo. `vercel.json` forces the **Vite** framework with `npm run build` → output `dist`, so the Python files at the root don't confuse the detector.
 2. **No zero-config backend deployment** — Vercel only serves the static UI.
 3. Add a build-time environment variable in Vercel:
-   - `VITE_API_BASE=https://textualize-backend.onrender.com`
-   The URL is injected into the page during `vite build`, so the UI calls your Render backend instead of the same origin.
+   - `VITE_API_BASE=https://your-backend-url` (your HF Space / Render / tunnel URL)
+   The URL is injected into the page during `vite build`, so the UI calls your backend instead of the same origin.
 4. CORS is already open (`allow_origins=["*"]`), so cross-origin API calls work.
 
 During local development the frontend falls back to the same origin
