@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Textualize — 3D Text Analysis Demo</title>
+  <script>window.__API_BASE__ = '';</script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0e17;
+      --surface: #111827;
+      --surface2: #1a2235;
+      --border: #2a3550;
+      --primary: #6366f1;
+      --primary-hover: #818cf8;
+      --accent: #22d3ee;
+      --text: #e2e8f0;
+      --text-dim: #94a3b8;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --warning: #eab308;
+      --radius: 12px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Rotating 3D particle background ── */
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .topbar, .steps-bar, .main { position: relative; z-index: 1; }
+
+    /* ── Top Nav ── */
+    .topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 32px; height: 56px;
+      background: rgba(10,14,23,.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-brand { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+    .topbar-brand span { color: var(--accent); }
+    .topbar-user { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-dim); }
+    .topbar-user .name { color: var(--text); font-weight: 600; }
+    .topbar-user button {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    }
+    .topbar-user button:hover { border-color: var(--danger); color: var(--danger); }
+
+    /* ── Steps Bar ── */
+    .steps-bar {
+      position: fixed; top: 56px; left: 0; right: 0; z-index: 99;
+      display: flex; align-items: center; justify-content: center;
+      padding: 12px 32px; gap: 0;
+      background: rgba(10,14,23,.75);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .step-pill {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 16px; border-radius: 20px;
+      font-size: 12px; font-weight: 600; color: var(--text-dim);
+      background: transparent; border: 1px solid transparent;
+      transition: all .25s;
+    }
+    .step-pill .num {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--surface2); border: 1px solid var(--border);
+      font-size: 11px; font-weight: 700; transition: all .25s;
+    }
+    .step-pill.active { color: var(--text); background: var(--surface2); border-color: var(--border); }
+    .step-pill.active .num { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .step-pill.done { color: var(--success); }
+    .step-pill.done .num { background: var(--success); border-color: var(--success); color: #fff; }
+    .step-connector {
+      width: 40px; height: 2px; background: var(--border); margin: 0 4px;
+    }
+    .step-connector.done { background: var(--success); }
+
+    /* ── Main Area ── */
+    .main { padding: 120px 32px 40px; max-width: 900px; margin: 0 auto; }
+
+    .panel {
+      display: none;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      animation: fadeIn .3s ease;
+    }
+    .panel.active { display: block; }
+    #panel-auth { background: rgba(17, 24, 39, 0.72); }
+    .panel:not(#panel-auth) { background: rgba(17, 24, 39, 0.88); }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    .panel h2 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+    .panel .subtitle { color: var(--text-dim); font-size: 14px; margin-bottom: 28px; }
+
+    /* ── Forms ── */
+    .form-grid { display: grid; gap: 16px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px;
+    }
+    input[type="text"], input[type="email"], input[type="password"], input[type="file"], select, textarea {
+      width: 100%; padding: 10px 14px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 14px; outline: none; transition: border-color .2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+    textarea { resize: vertical; min-height: 80px; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600;
+      border: none; cursor: pointer; transition: all .2s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+    .btn-ghost:hover { border-color: var(--text); color: var(--text); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-sm { padding: 6px 14px; font-size: 12px; }
+    .btn-row { display: flex; gap: 12px; margin-top: 24px; }
+
+    /* ── Alerts ── */
+    .alert {
+      padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 20px;
+      display: none;
+    }
+    .alert.show { display: block; }
+    .alert-error { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3); color: var(--danger); }
+    .alert-success { background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); color: var(--success); }
+    .alert-info { background: rgba(34,211,238,.08); border: 1px solid rgba(34,211,238,.2); color: var(--accent); }
+
+    /* ── Table ── */
+    .table-wrap { overflow-x: auto; margin-top: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px 12px; color: var(--text-dim); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    tr:hover td { background: rgba(99,102,241,.04); }
+
+    /* ── Cards ── */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 16px; }
+    .card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; cursor: pointer; transition: all .2s;
+    }
+    .card:hover { border-color: var(--primary); }
+    .card.selected { border-color: var(--primary); background: rgba(99,102,241,.06); }
+    .card h4 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .card p { font-size: 12px; color: var(--text-dim); }
+    .card .meta { display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+
+    /* ── Upload Zone ── */
+    .upload-zone {
+      border: 2px dashed var(--border); border-radius: var(--radius);
+      padding: 48px; text-align: center; cursor: pointer;
+      transition: all .2s; margin-top: 12px;
+    }
+    .upload-zone:hover, .upload-zone.dragover { border-color: var(--primary); background: rgba(99,102,241,.04); }
+    .upload-zone .icon { font-size: 40px; margin-bottom: 12px; }
+    .upload-zone p { color: var(--text-dim); font-size: 13px; }
+    .upload-zone .hint { font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+
+    /* ── Processing ── */
+    .spinner {
+      width: 48px; height: 48px; border: 3px solid var(--border);
+      border-top-color: var(--primary); border-radius: 50%;
+      animation: spin .8s linear infinite; margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── 3D Viz ── */
+    .viz-container { display: flex; gap: 16px; height: 70vh; margin-top: 16px; }
+    .viz-sidebar {
+      width: 280px; flex-shrink: 0;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; overflow-y: auto;
+    }
+    .viz-sidebar h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; color: var(--text-dim); }
+    .filter-group { margin-bottom: 16px; }
+    .filter-group label { font-size: 11px; margin-bottom: 4px; }
+    .filter-group select, .filter-group input {
+      font-size: 13px; padding: 8px 10px;
+    }
+    .filter-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 10px; border-radius: 12px; font-size: 11px;
+      background: rgba(99,102,241,.1); border: 1px solid rgba(99,102,241,.3);
+      color: var(--primary-hover); margin: 2px;
+    }
+    .filter-chip .remove { cursor: pointer; font-weight: 700; }
+    .active-filters { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+
+    .viz-canvas-wrap {
+      flex: 1; position: relative;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    .viz-canvas-wrap canvas { display: block; }
+
+    .viz-tooltip {
+      position: absolute; display: none;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px; font-size: 12px;
+      max-width: 320px; pointer-events: none; z-index: 10;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+    .viz-tooltip .tt-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+    .viz-tooltip .tt-meta { color: var(--text-dim); margin-bottom: 6px; }
+    .viz-tooltip .tt-body { color: var(--text-dim); line-height: 1.5; }
+
+    .viz-stats {
+      position: absolute; top: 12px; left: 12px;
+      background: rgba(17,24,39,.85); backdrop-filter: blur(8px);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; font-size: 12px;
+    }
+    .viz-stats .stat-row { display: flex; gap: 8px; margin-bottom: 2px; }
+    .viz-stats .stat-label { color: var(--text-dim); }
+    .viz-stats .stat-val { font-weight: 600; }
+
+    .legend {
+      position: absolute; bottom: 12px; left: 12px;
+      background: rgba(17,24,39,.85); backdrop-filter: blur(8px);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; font-size: 11px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    .hidden { display: none !important; }
+
+    .login-link { color: var(--primary-hover); cursor: pointer; text-decoration: underline; font-size: 13px; margin-top: 8px; display: inline-block; }
+    .login-link:hover { color: var(--accent); }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .main { padding: 130px 16px 40px; }
+      .panel { padding: 24px; }
+      .form-row { grid-template-columns: 1fr; }
+      .viz-container { flex-direction: column; height: auto; }
+      .viz-sidebar { width: 100%; }
+      .viz-canvas-wrap { height: 60vh; }
+      .steps-bar { padding: 8px 12px; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Rotating 3D particle background ── -->
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+<!-- ── Topbar ── -->
+<div class="topbar">
+  <div class="topbar-brand"><span>Text</span> Analysis</div>
+  <div class="topbar-user" id="topbar-user" style="display:none">
+    <span class="name" id="user-display"></span>
+    <button onclick="logout()">Sign out</button>
+  </div>
+</div>
+
+<!-- ── Steps ── -->
+<div class="steps-bar" id="steps-bar" style="display:none">
+  <div class="step-pill" data-step="register"><span class="num">1</span>Register</div>
+  <div class="step-connector"></div>
+  <div class="step-pill" data-step="createset"><span class="num">2</span>Create TextSet</div>
+  <div class="step-connector"></div>
+  <div class="step-pill" data-step="upload"><span class="num">3</span>Upload File</div>
+  <div class="step-connector"></div>
+  <div class="step-pill" data-step="processing"><span class="num">4</span>Processing</div>
+  <div class="step-connector"></div>
+  <div class="step-pill" data-step="visualize"><span class="num">5</span>Visualize</div>
+</div>
+
+<!-- ── Main ── -->
+<div class="main">
+
+  <!-- STEP 0: Auth (Register / Login) -->
+  <div class="panel active" id="panel-auth">
+    <h2>Welcome</h2>
+    <p class="subtitle">Create an account or sign in to begin</p>
+
+    <div id="alert-auth" class="alert"></div>
+
+    <!-- Register -->
+    <div id="auth-register">
+      <div class="form-grid">
+        <div class="form-row">
+          <div>
+            <label>Username</label>
+            <input type="text" id="reg-username" />
+          </div>
+          <div>
+            <label>Email</label>
+            <input type="email" id="reg-email" />
+          </div>
+        </div>
+        <div>
+          <label>Password</label>
+          <input type="password" id="reg-password" />
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="doRegister()">Create Account</button>
+      </div>
+      <p class="login-link" onclick="toggleAuthMode('login')">Already have an account? Sign in</p>
+    </div>
+
+    <!-- Login -->
+    <div id="auth-login" class="hidden">
+      <div class="form-grid">
+        <div>
+          <label>Username or Email</label>
+          <input type="text" id="login-username" />
+        </div>
+        <div>
+          <label>Password</label>
+          <input type="password" id="login-password" />
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="doLogin()">Sign In</button>
+      </div>
+      <p class="login-link" onclick="toggleAuthMode('register')">Don't have an account? Create one</p>
+    </div>
+  </div>
+
+  <!-- STEP 1: Create TextSet -->
+  <div class="panel" id="panel-createset">
+    <h2>Create TextSet</h2>
+    <p class="subtitle">A TextSet is a collection of text documents you want to analyze</p>
+    <div id="alert-createset" class="alert"></div>
+    <div class="form-grid">
+      <div>
+        <label>Title</label>
+        <input type="text" id="ts-title" />
+      </div>
+      <div>
+        <label>Description</label>
+        <textarea id="ts-desc"></textarea>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="createTextSet()">Create TextSet</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Select TextSet + Upload File -->
+  <div class="panel" id="panel-upload">
+    <h2>Upload Data</h2>
+    <p class="subtitle">Select a TextSet and upload an Excel file (.xls / .xlsx)</p>
+    <div id="alert-upload" class="alert"></div>
+
+    <label>Select TextSet</label>
+    <select id="upload-ts-select" onchange="onTextSetSelect()">
+      <option value="">— Select a TextSet —</option>
+    </select>
+
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+      <div class="icon">📄</div>
+      <p>Drag &amp; drop your file here or click to browse</p>
+      <p class="hint">Supported: .xls, .xlsx</p>
+      <input type="file" id="file-input" accept=".xls,.xlsx" style="display:none" onchange="onFileSelect(event)" />
+    </div>
+
+    <div class="btn-row" style="justify-content:center;margin-top:16px">
+      <button class="btn btn-ghost" onclick="downloadSampleXlsx()">⬇ Download Sample Excel File</button>
+    </div>
+
+    <div id="file-info" class="hidden" style="margin-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <span style="font-size:24px">📎</span>
+        <div style="flex:1">
+          <div id="file-name" style="font-weight:600;font-size:14px"></div>
+          <div id="file-size" style="font-size:12px;color:var(--text-dim)"></div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="clearFile()">Remove</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-upload" onclick="uploadFile()" disabled>Upload &amp; Process</button>
+      <button class="btn btn-ghost" onclick="goToStep('visualize')">Skip → Visualize existing data</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: Processing -->
+  <div class="panel" id="panel-processing">
+    <h2>Processing</h2>
+    <p class="subtitle">Your file is being parsed and embeddings are being generated</p>
+    <div id="alert-processing" class="alert"></div>
+    <div style="text-align:center;padding:40px 0">
+      <div class="spinner"></div>
+      <p id="processing-msg" style="color:var(--text-dim)">Watching for file processing...</p>
+      <p id="processing-detail" style="font-size:12px;color:var(--text-dim);margin-top:8px"></p>
+    </div>
+    <div class="btn-row" style="justify-content:center">
+      <button class="btn btn-ghost" onclick="skipProcessing()">Skip — Check manually</button>
+    </div>
+  </div>
+
+  <!-- STEP 4: Visualize -->
+  <div class="panel" id="panel-visualize" style="max-width:1200px">
+    <h2>3D Visualization</h2>
+    <p class="subtitle">Explore your text data in 3D space — each point is a document, positioned by semantic similarity</p>
+
+    <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+      <select id="viz-ts-select" style="min-width:220px" onchange="loadVisualization()">
+        <option value="">— Select a TextSet —</option>
+      </select>
+      <button class="btn btn-sm btn-ghost" onclick="loadVisualization()">Refresh</button>
+      <button class="btn btn-sm btn-ghost" onclick="goToStep('upload')">← Back to Upload</button>
+    </div>
+
+    <div class="viz-container" id="viz-container" style="display:none">
+      <div class="viz-sidebar" id="viz-sidebar">
+        <h3>Filters</h3>
+        <div id="filter-controls"></div>
+        <h3 style="margin-top:16px">Active Filters</h3>
+        <div class="active-filters" id="active-filters">
+          <span style="font-size:12px;color:var(--text-dim)">No filters applied</span>
+        </div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-sm btn-ghost" onclick="clearAllFilters()">Clear All</button>
+        </div>
+      </div>
+      <div class="viz-canvas-wrap" id="viz-canvas-wrap">
+        <div class="viz-stats" id="viz-stats"></div>
+        <div class="legend" id="viz-legend"></div>
+        <div class="viz-tooltip" id="viz-tooltip">
+          <div class="tt-title"></div>
+          <div class="tt-meta"></div>
+          <div class="tt-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="viz-empty" class="hidden" style="text-align:center;padding:60px 0;color:var(--text-dim)">
+      <p style="font-size:36px;margin-bottom:12px">📊</p>
+      <p>Select a TextSet above to visualize its data in 3D space</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ──────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────
+const API = (window.__API_BASE__ || window.location.origin);
+let state = {
+  token: null,
+  userId: null,
+  userName: null,
+  currentStep: 'register',
+  textSets: [],
+  selectedTextSetId: null,
+  attributes: [],
+  textItems: [],
+  filters: {},          // { attribute_id: value }
+  filteredItems: [],
+  scene: null,
+  camera: null,
+  renderer: null,
+  raycaster: null,
+  mouse: null,
+  points: null,
+  pointData: [],        // parallel array to geometry
+  hoveredPoint: null,
+  isRotating: true,
+  colorMode: 'default',
+  legendColors: {},
+};
+
+// ──────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────
+function headers() { return state.token ? { 'Authorization': `Bearer ${state.token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }; }
+function headersMultipart() { return state.token ? { 'Authorization': `Bearer ${state.token}` } : {}; }
+
+function showAlert(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = `alert show alert-${type}`;
+  el.textContent = msg;
+  if (type === 'error') setTimeout(() => el.classList.remove('show'), 6000);
+}
+
+async function goToStep(step) {
+  const order = ['register','createset','upload','processing','visualize'];
+  const idx = order.indexOf(step);
+  if (idx < 0) step = 'register';
+  if (idx < 1 && !state.token) step = 'register';
+  else if (idx >= 1 && !state.token) step = 'register';
+  state.currentStep = step;
+
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const panelId = (step === 'register') ? 'auth' : step;
+  document.getElementById(`panel-${panelId}`).classList.add('active');
+
+  // Update steps bar
+  document.querySelectorAll('.step-pill').forEach(pill => {
+    const s = pill.dataset.step;
+    const si = order.indexOf(s);
+    pill.classList.remove('active','done');
+    if (s === step) pill.classList.add('active');
+    else if (si < idx) pill.classList.add('done');
+  });
+  document.querySelectorAll('.step-connector').forEach((c, i) => {
+    c.classList.toggle('done', i < idx - 1);
+  });
+
+  // Show steps bar & topbar user
+  if (state.token) {
+    document.getElementById('steps-bar').style.display = 'flex';
+    document.getElementById('topbar-user').style.display = 'flex';
+    document.getElementById('user-display').textContent = state.userName || state.userId;
+  }
+
+  // Lazy-load visualization when arriving at that step
+  if (step === 'visualize' && state.token) {
+    if (!state.textSets.length) await loadTextSets();
+    const sel = document.getElementById('viz-ts-select');
+    if (!sel.value && state.textSets.length) {
+      sel.value = state.textSets[0].id;
+    }
+    if (sel.value && state.selectedTextSetId !== sel.value) {
+      loadVisualization();
+    }
+  }
+}
+
+// ──────────────────────────────────────────────
+// Auth
+// ──────────────────────────────────────────────
+function toggleAuthMode(mode) {
+  document.getElementById('auth-register').classList.toggle('hidden', mode !== 'register');
+  document.getElementById('auth-login').classList.toggle('hidden', mode !== 'login');
+}
+
+async function doRegister() {
+  const body = {
+    user_name: document.getElementById('reg-username').value.trim(),
+    email: document.getElementById('reg-email').value.trim(),
+    password: document.getElementById('reg-password').value,
+  };
+  if (!body.user_name || !body.email || !body.password) return showAlert('alert-auth','error','All fields are required');
+  try {
+    const r = await fetch(`${API}/api/signup`, { method:'POST', headers: headers(), body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Registration failed');
+    showAlert('alert-auth','success','Account created! Please sign in.');
+    toggleAuthMode('login');
+    document.getElementById('login-username').value = body.user_name;
+    document.getElementById('login-password').value = body.password;
+  } catch(e) { showAlert('alert-auth','error', e.message); }
+}
+
+async function doLogin() {
+  const body = {
+    username: document.getElementById('login-username').value.trim(),
+    password: document.getElementById('login-password').value,
+  };
+  if (!body.username || !body.password) return showAlert('alert-auth','error','All fields are required');
+  try {
+    const r = await fetch(`${API}/api/login`, { method:'POST', headers: headers(), body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Login failed');
+    state.token = d.access_token;
+    state.userId = d.user_id;
+    state.userName = d.name;
+    goToStep('createset');
+    loadTextSets();
+  } catch(e) { showAlert('alert-auth','error', e.message); }
+}
+
+function logout() {
+  state.token = null; state.userId = null; state.userName = null;
+  document.getElementById('steps-bar').style.display = 'none';
+  document.getElementById('topbar-user').style.display = 'none';
+  goToStep('register');
+}
+
+// ──────────────────────────────────────────────
+// TextSets
+// ──────────────────────────────────────────────
+async function loadTextSets() {
+  try {
+    const r = await fetch(`${API}/api/TextSets`, { headers: headers() });
+    const d = await r.json();
+    state.textSets = d.items || [];
+    populateTextSetSelects();
+  } catch(e) { console.error(e); }
+}
+
+function populateTextSetSelects() {
+  const selects = ['upload-ts-select','viz-ts-select'];
+  selects.forEach(id => {
+    const sel = document.getElementById(id);
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— Select a TextSet —</option>';
+    state.textSets.forEach(ts => {
+      const opt = document.createElement('option');
+      opt.value = ts.id;
+      opt.textContent = `${ts.title} (${ts.entry_count} items)`;
+      sel.appendChild(opt);
+    });
+    if (current) sel.value = current;
+  });
+}
+
+async function createTextSet() {
+  const title = document.getElementById('ts-title').value.trim();
+  const description = document.getElementById('ts-desc').value.trim();
+  if (!title) return showAlert('alert-createset','error','Title is required');
+  try {
+    const r = await fetch(`${API}/api/TextSets`, { method:'POST', headers: headers(), body: JSON.stringify({ title, description }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Failed to create TextSet');
+    showAlert('alert-createset','success','TextSet created!');
+    await loadTextSets();
+    document.getElementById('ts-title').value = '';
+    document.getElementById('ts-desc').value = '';
+    setTimeout(() => goToStep('upload'), 600);
+  } catch(e) { showAlert('alert-createset','error', e.message); }
+}
+
+// ──────────────────────────────────────────────
+// Upload
+// ──────────────────────────────────────────────
+function onTextSetSelect() {
+  state.selectedTextSetId = document.getElementById('upload-ts-select').value;
+  updateUploadButton();
+}
+
+function updateUploadButton() {
+  const btn = document.getElementById('btn-upload');
+  const fileInput = document.getElementById('file-input');
+  btn.disabled = !state.selectedTextSetId || !fileInput.files.length;
+}
+
+let selectedFile = null;
+
+function onFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  selectedFile = file;
+  document.getElementById('file-name').textContent = file.name;
+  document.getElementById('file-size').textContent = formatBytes(file.size);
+  document.getElementById('file-info').classList.remove('hidden');
+  updateUploadButton();
+}
+
+function clearFile() {
+  selectedFile = null;
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-info').classList.add('hidden');
+  updateUploadButton();
+}
+
+function formatBytes(b) { if(b===0) return '0 B'; const k=1024,s=['B','KB','MB','GB']; const i=Math.floor(Math.log(b)/Math.log(k)); return parseFloat((b/Math.pow(k,i)).toFixed(1))+' '+s[i]; }
+
+function downloadSampleXlsx() {
+  const cols = [
+    'creator_id', 'creator_name', 'text_content', 'post_date',
+    'external_item_id', 'parent_external_item_id',
+    'Sentiment|Select', 'Channel|Select', 'Rating|Numeric', 'Region|Text'
+  ];
+
+  const samples = [
+    ['u-100', 'Priya Shah', 'The checkout process was incredibly smooth and fast. Highly recommend this platform to anyone.', '2025-11-01T09:12:00', 't-1001', '', 'Positive|Happy', 'Mobile App', 5, 'North America'],
+    ['u-101', 'Miguel Torres', 'I had a few hiccups with the payment gateway, but customer support resolved it within minutes.', '2025-11-01T10:03:00', 't-1002', 't-1001', 'Neutral', 'Web', 3, 'Europe'],
+    ['u-102', 'Aisha Bello', 'Loved the new dashboard. The charts load instantly and everything feels snappy.', '2025-11-02T14:27:00', 't-1003', '', 'Positive', 'Web', 4, 'Africa'],
+    ['u-103', 'Lena Fischer', 'Search results were not very relevant this time. Hoping the ranking improves soon.', '2025-11-02T16:45:00', 't-1004', 't-1003', 'Negative', 'Mobile App', 2, 'Europe'],
+    ['u-104', 'Raj Gupta', 'The onboarding tutorial saved me hours. Very intuitive for new users.', '2025-11-03T08:20:00', 't-1005', '', 'Positive|Satisfied', 'Web', 5, 'Asia'],
+    ['u-105', 'Sofia Rossi', 'Battery drain is noticeable after the latest update. Performance needs work.', '2025-11-03T11:58:00', 't-1006', 't-1005', 'Negative|Frustrated', 'Mobile App', 1, 'Europe'],
+    ['u-106', 'David Kim', 'Sync across devices is flawless. Notes appear instantly everywhere.', '2025-11-04T13:09:00', 't-1007', '', 'Positive', 'Desktop App', 4, 'Asia'],
+    ['u-107', 'Emma Johnson', 'Pricing feels a bit steep compared to competitors, but the features justify the cost.', '2025-11-04T15:32:00', 't-1008', 't-1007', 'Neutral', 'Web', 3, 'North America'],
+    ['u-108', 'Noah Williams', 'Support team is top notch. They walked me through a complex setup step by step.', '2025-11-05T10:17:00', 't-1009', '', 'Positive|Helpful', 'Desktop App', 5, 'Australia'],
+    ['u-109', 'Olivia Brown', 'App crashes occasionally on large files, which is frustrating during meetings.', '2025-11-05T19:40:00', 't-1010', 't-1009', 'Negative', 'Desktop App', 2, 'Europe'],
+    ['u-110', 'Liam Martin', 'The new export feature is a game changer for my reporting workflow.', '2025-11-06T07:55:00', 't-1011', '', 'Positive', 'Web', 5, 'North America'],
+    ['u-111', 'Zara Ahmed', 'Notifications are a bit noisy. Would love granular control over what I receive.', '2025-11-06T12:04:00', 't-1012', 't-1011', 'Neutral', 'Mobile App', 3, 'Asia'],
+    ['u-112', 'Ethan Clark', 'Integration with our CRM took minutes and worked out of the box.', '2025-11-07T09:33:00', 't-1013', '', 'Positive|Smooth', 'Desktop App', 4, 'South America'],
+    ['u-113', 'Mia Walker', 'Loading spinner takes forever on the reports page. Please optimize.', '2025-11-07T18:21:00', 't-1014', 't-1013', 'Negative', 'Web', 2, 'Africa'],
+    ['u-114', 'Jacob Lewis', 'Mobile app feels polished and the dark mode is beautiful.', '2025-11-08T08:14:00', 't-1015', '', 'Positive', 'Mobile App', 4, 'Australia'],
+    ['u-115', 'Amelia King', 'I wish the free tier had more storage. Otherwise a great product.', '2025-11-08T13:46:00', 't-1016', 't-1015', 'Neutral', 'Web', 3, 'Europe'],
+    ['u-116', 'Elijah Scott', 'Found a bug in the settings page but the team fixed it within a day.', '2025-11-09T11:29:00', 't-1017', '', 'Neutral|Resolved', 'Web', 4, 'North America'],
+    ['u-117', 'Charlotte Green', 'This tool has transformed how our team collaborates on research documents.', '2025-11-09T15:50:00', 't-1018', '', 'Positive', 'Web', 5, 'Europe'],
+    ['u-118', 'James Adams', 'Voice input works surprisingly well for long dictations.', '2025-11-10T09:02:00', 't-1019', 't-1018', 'Positive', 'Mobile App', 4, 'South America'],
+    ['u-119', 'Harper Nelson', 'Themes reset after every update, which is annoying. Please persist them.', '2025-11-10T17:13:00', 't-1020', 't-1019', 'Negative', 'Desktop App', 2, 'North America']
+  ];
+
+  const header = cols;
+  const ws = XLSX.utils.aoa_to_sheet([header, ...samples]);
+  ws['!cols'] = cols.map(c => ({ wch: Math.max(c.length + 2, 22) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'SampleData');
+  XLSX.writeFile(wb, 'textualize-sample-data.xlsx');
+
+  clearFile();
+  showAlert('alert-upload', 'info', 'Sample file downloaded. Now upload it to any TextSet to demo the flow.');
+}
+
+// Drag & drop
+const uz = document.getElementById('upload-zone');
+uz.addEventListener('dragover', e => { e.preventDefault(); uz.classList.add('dragover'); });
+uz.addEventListener('dragleave', () => uz.classList.remove('dragover'));
+uz.addEventListener('drop', e => {
+  e.preventDefault(); uz.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file && (file.name.endsWith('.xls') || file.name.endsWith('.xlsx'))) {
+    document.getElementById('file-input').files = e.dataTransfer.files;
+    onFileSelect({ target: { files: [file] } });
+  }
+});
+
+async function uploadFile() {
+  if (!state.selectedTextSetId || !selectedFile) return;
+  goToStep('processing');
+  document.getElementById('processing-msg').textContent = 'Uploading file...';
+
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+
+  try {
+    const r = await fetch(`${API}/api/TextSet/${state.selectedTextSetId}/upload-file/`, {
+      method: 'POST', headers: headersMultipart(), body: fd
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Upload failed');
+    document.getElementById('processing-msg').textContent = 'File uploaded! Waiting for processing...';
+    document.getElementById('processing-detail').textContent = `File: ${d.file_path || selectedFile.name}`;
+    pollProcessing();
+  } catch(e) {
+    showAlert('alert-processing','error', e.message);
+    document.getElementById('processing-msg').textContent = 'Upload failed';
+  }
+}
+
+let pollInterval = null;
+function pollProcessing() {
+  if (pollInterval) clearInterval(pollInterval);
+  let attempts = 0;
+  pollInterval = setInterval(async () => {
+    attempts++;
+    try {
+      const r = await fetch(`${API}/api/TextItems/${state.selectedTextSetId}`, { headers: headers() });
+      const d = await r.json();
+      const count = (d.items || []).length;
+      document.getElementById('processing-detail').textContent = `Attempt ${attempts} — ${count} items found`;
+      if (count > 0) {
+        clearInterval(pollInterval);
+        showAlert('alert-processing','success', `Processing complete! ${count} items ready.`);
+        setTimeout(() => goToStep('visualize'), 1000);
+      }
+    } catch(e) { /* keep polling */ }
+    if (attempts > 120) { // 2 minutes max
+      clearInterval(pollInterval);
+      showAlert('alert-processing','info', 'Processing is taking longer. You can check back later.');
+    }
+  }, 1000);
+}
+
+function skipProcessing() {
+  if (pollInterval) clearInterval(pollInterval);
+  goToStep('visualize');
+}
+
+// ──────────────────────────────────────────────
+// Visualization
+// ──────────────────────────────────────────────
+async function loadVisualization() {
+  const tsId = document.getElementById('viz-ts-select').value;
+  if (!tsId) { document.getElementById('viz-container').style.display = 'none'; document.getElementById('viz-empty').classList.remove('hidden'); return; }
+  document.getElementById('viz-container').style.display = 'flex';
+  document.getElementById('viz-empty').classList.add('hidden');
+
+  state.selectedTextSetId = tsId;
+
+  // Load attributes + items in parallel
+  const [attrRes, itemRes] = await Promise.all([
+    fetch(`${API}/api/TextSets/${tsId}/attributes`, { headers: headers() }),
+    fetch(`${API}/api/TextItems/${tsId}`, { headers: headers() })
+  ]);
+  const attrData = await attrRes.json();
+  const itemData = await itemRes.json();
+
+  state.attributes = attrData.items || [];
+  state.textItems = itemData.items || [];
+  state.filteredItems = [...state.textItems];
+  state.filters = {};
+
+  buildFilterUI();
+  render3D();
+}
+
+function buildFilterUI() {
+  const container = document.getElementById('filter-controls');
+  container.innerHTML = '';
+
+  // Search by query (built-in)
+  let html = `
+    <div class="filter-group">
+      <label>Search Text</label>
+      <input type="text" id="filter-search" placeholder="Search text content..." oninput="applyFilters()" />
+    </div>
+  `;
+
+  state.attributes.forEach(attr => {
+    if (attr.attribute_type === 'Numeric') {
+      html += `
+        <div class="filter-group">
+          <label>${attr.attribute_name} (${attr.num_range_low}–${attr.num_range_high})</label>
+          <div style="display:flex;gap:8px">
+            <input type="number" id="filter-${attr.attribute_id}-min" placeholder="Min" style="width:50%" oninput="applyFilters()" />
+            <input type="number" id="filter-${attr.attribute_id}-max" placeholder="Max" style="width:50%" oninput="applyFilters()" />
+          </div>
+        </div>
+      `;
+    } else if (attr.attribute_type === 'Select' && attr.select_choices && attr.select_choices.length) {
+      html += `<div class="filter-group"><label>${attr.attribute_name}</label><div>`;
+      attr.select_choices.forEach(ch => {
+        html += `<label style="text-transform:none;letter-spacing:0;font-size:12px;display:flex;align-items:center;gap:4px;margin-bottom:4px">
+          <input type="checkbox" class="filter-select" data-attr="${attr.attribute_id}" value="${ch}" onchange="applyFilters()" /> ${ch}
+        </label>`;
+      });
+      html += `</div></div>`;
+    } else {
+      html += `
+        <div class="filter-group">
+          <label>${attr.attribute_name}</label>
+          <input type="text" id="filter-${attr.attribute_id}" placeholder="Filter..." oninput="applyFilters()" />
+        </div>
+      `;
+    }
+  });
+
+  container.innerHTML = html;
+}
+
+async function applyFilters() {
+  const tsId = state.selectedTextSetId;
+  const query = document.getElementById('filter-search')?.value?.trim() || '';
+
+  // Build attribute filter payload
+  const attrFilter = {};
+  state.attributes.forEach(attr => {
+    if (attr.attribute_type === 'Numeric') {
+      // handled client-side from item data
+    } else if (attr.attribute_type === 'Select') {
+      const checked = [...document.querySelectorAll(`.filter-select[data-attr="${attr.attribute_id}"]:checked`)].map(c => c.value);
+      if (checked.length) attrFilter[attr.attribute_id] = checked;
+    } else {
+      const val = document.getElementById(`filter-${attr.attribute_id}`)?.value?.trim();
+      if (val) attrFilter[attr.attribute_id] = val;
+    }
+  });
+
+  // If we have attribute filters, try the search API
+  if (Object.keys(attrFilter).length > 0 || query) {
+    try {
+      const body = {
+        text_set_ids_in: [tsId],
+        attributes: {}
+      };
+      // Map select filters for server-side
+      Object.entries(attrFilter).forEach(([aid, val]) => {
+        if (Array.isArray(val)) {
+          body.attributes[aid] = val.join(',');
+        } else {
+          body.attributes[aid] = val;
+        }
+      });
+      const r = await fetch(`${API}/api/TextItem/search?page=1&page_size=5000`, {
+        method: 'POST', headers: headers(), body: JSON.stringify(body)
+      });
+      const d = await r.json();
+      let items = d.items || [];
+      // Client-side search filter
+      if (query) {
+        const q = query.toLowerCase();
+        items = items.filter(i => i.text_content?.toLowerCase().includes(q));
+      }
+      state.filteredItems = items;
+    } catch(e) {
+      console.warn('Server filter failed, falling back to client-side', e);
+      clientSideFilter(query, attrFilter);
+    }
+  } else {
+    state.filteredItems = [...state.textItems];
+  }
+
+  renderActiveFilters(attrFilter);
+  update3DPoints();
+}
+
+function clientSideFilter(query, attrFilter) {
+  let items = [...state.textItems];
+  if (query) {
+    const q = query.toLowerCase();
+    items = items.filter(i => i.text_content?.toLowerCase().includes(q));
+  }
+  // We don't have attribute values in textItems, so just filter on text
+  state.filteredItems = items;
+}
+
+function renderActiveFilters(attrFilter) {
+  const container = document.getElementById('active-filters');
+  const query = document.getElementById('filter-search')?.value?.trim();
+  let chips = '';
+  if (query) chips += `<span class="filter-chip">Search: "${query}" <span class="remove" onclick="document.getElementById('filter-search').value='';applyFilters()">×</span></span>`;
+  state.attributes.forEach(attr => {
+    if (attr.attribute_type === 'Select') {
+      const checked = document.querySelectorAll(`.filter-select[data-attr="${attr.attribute_id}"]:checked`);
+      checked.forEach(c => {
+        chips += `<span class="filter-chip">${attr.attribute_name}: ${c.value} <span class="remove" onclick="this.closest('.filter-select')?.click();applyFilters()">×</span></span>`;
+      });
+    } else {
+      const el = document.getElementById(`filter-${attr.attribute_id}`);
+      if (el && el.value.trim()) {
+        chips += `<span class="filter-chip">${attr.attribute_name}: ${el.value} <span class="remove" onclick="document.getElementById('filter-${attr.attribute_id}').value='';applyFilters()">×</span></span>`;
+      }
+    }
+  });
+  container.innerHTML = chips || '<span style="font-size:12px;color:var(--text-dim)">No filters applied</span>';
+}
+
+function clearAllFilters() {
+  document.getElementById('filter-search').value = '';
+  state.attributes.forEach(attr => {
+    if (attr.attribute_type === 'Select') {
+      document.querySelectorAll(`.filter-select[data-attr="${attr.attribute_id}"]`).forEach(c => c.checked = false);
+    } else {
+      const el = document.getElementById(`filter-${attr.attribute_id}`);
+      if (el) el.value = '';
+      const minEl = document.getElementById(`filter-${attr.attribute_id}-min`);
+      const maxEl = document.getElementById(`filter-${attr.attribute_id}-max`);
+      if (minEl) minEl.value = '';
+      if (maxEl) maxEl.value = '';
+    }
+  });
+  applyFilters();
+}
+
+// ──────────────────────────────────────────────
+// Three.js 3D Rendering
+// ──────────────────────────────────────────────
+function render3D() {
+  const wrap = document.getElementById('viz-canvas-wrap');
+
+  // Cleanup old
+  if (state.renderer) { state.renderer.dispose(); wrap.querySelector('canvas')?.remove(); }
+
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+
+  state.scene = new THREE.Scene();
+  state.scene.background = new THREE.Color(0x0a0e17);
+
+  state.camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 10000);
+  state.camera.position.set(0, 0, 5);
+
+  state.renderer = new THREE.WebGLRenderer({ antialias: true });
+  state.renderer.setSize(w, h);
+  state.renderer.setPixelRatio(window.devicePixelRatio);
+  wrap.appendChild(state.renderer.domElement);
+
+  state.raycaster = new THREE.Raycaster();
+  state.raycaster.params.Points.threshold = 0.08;
+  state.mouse = new THREE.Vector2();
+
+  // Lights
+  state.scene.add(new THREE.AmbientLight(0xffffff, 1));
+
+  // Grid helper
+  const grid = new THREE.GridHelper(20, 20, 0x1a2235, 0x1a2235);
+  grid.rotation.x = Math.PI / 2;
+  grid.position.z = -0.5;
+  state.scene.add(grid);
+
+  buildPoints();
+
+  // Mouse events
+  const canvas = state.renderer.domElement;
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mousedown', () => { state.isRotating = false; });
+  canvas.addEventListener('mouseup', () => { state.isRotating = true; });
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+
+  // Resize
+  const ro = new ResizeObserver(() => {
+    const nw = wrap.clientWidth, nh = wrap.clientHeight;
+    state.camera.aspect = nw / nh;
+    state.camera.updateProjectionMatrix();
+    state.renderer.setSize(nw, nh);
+  });
+  ro.observe(wrap);
+
+  animate();
+}
+
+function buildPoints() {
+  const items = state.filteredItems;
+  const geo = new THREE.BufferGeometry();
+  const positions = [];
+  const colors = [];
+  const sizes = [];
+
+  const palette = [
+    0x6366f1, 0x22d3ee, 0x22c55e, 0xeab308, 0xef4444, 0xf97316,
+    0xa855f7, 0xec4899, 0x14b8a6, 0x84cc16, 0x06b6d4, 0xf43f5e
+  ];
+
+  // Color by creator if available
+  const creators = [...new Set(items.map(i => i.creator_name || i.creator_id || 'unknown'))];
+  state.legendColors = {};
+  creators.forEach((c, i) => { state.legendColors[c] = palette[i % palette.length]; });
+
+  items.forEach(item => {
+    const pv = item.pca_vector || [0, 0, 0];
+    positions.push(pv[0] || 0, pv[1] || 0, pv[2] || 0);
+
+    const creator = item.creator_name || item.creator_id || 'unknown';
+    const color = new THREE.Color(state.legendColors[creator] || 0x6366f1);
+    colors.push(color.r, color.g, color.b);
+
+    sizes.push(3 + Math.random());
+  });
+
+  if (positions.length === 0) {
+    state.scene.add(new THREE.AxesHelper(1.5));
+  }
+
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.04,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    sizeAttenuation: true,
+  });
+
+  if (state.points) state.scene.remove(state.points);
+  state.points = new THREE.Points(geo, mat);
+  state.scene.add(state.points);
+  state.pointData = items;
+
+  updateStats();
+  updateLegend(creators);
+}
+
+function update3DPoints() { buildPoints(); }
+
+function updateStats() {
+  const el = document.getElementById('viz-stats');
+  el.innerHTML = `
+    <div class="stat-row"><span class="stat-label">Total points:</span><span class="stat-val">${state.filteredItems.length}</span></div>
+    <div class="stat-row"><span class="stat-label">of</span><span class="stat-val">${state.textItems.length} items</span></div>
+    <div class="stat-row"><span class="stat-label">Creators:</span><span class="stat-val">${new Set(state.filteredItems.map(i=>i.creator_name||i.creator_id)).size}</span></div>
+  `;
+}
+
+function updateLegend(creators) {
+  const el = document.getElementById('viz-legend');
+  if (creators.length <= 1) { el.innerHTML = ''; return; }
+  el.innerHTML = creators.slice(0, 12).map(c =>
+    `<div class="legend-item"><div class="legend-dot" style="background:#${state.legendColors[c]?.toString(16).padStart(6,'0')}"></div>${c}</div>`
+  ).join('');
+}
+
+function onMouseMove(e) {
+  const wrap = document.getElementById('viz-canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  state.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  state.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+  state.raycaster.setFromCamera(state.mouse, state.camera);
+  const intersects = state.raycaster.intersectObject(state.points);
+
+  const tooltip = document.getElementById('viz-tooltip');
+
+  if (intersects.length > 0) {
+    const idx = intersects[0].index;
+    const item = state.pointData[idx];
+    if (item) {
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX - rect.left + 16) + 'px';
+      tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+      tooltip.querySelector('.tt-title').textContent = item.creator_name || 'Unknown';
+      tooltip.querySelector('.tt-meta').textContent = item.creator_id || '';
+      tooltip.querySelector('.tt-body').textContent = item.text_content?.substring(0, 200) + (item.text_content?.length > 200 ? '...' : '');
+
+      // Highlight
+      const sizes = state.points.geometry.attributes.size.array;
+      for (let i = 0; i < sizes.length; i++) sizes[i] = 3 + Math.random();
+      sizes[idx] = 8;
+      state.points.geometry.attributes.size.needsUpdate = true;
+    }
+  } else {
+    tooltip.style.display = 'none';
+    // Reset sizes
+    const sizes = state.points.geometry.attributes.size.array;
+    for (let i = 0; i < sizes.length; i++) sizes[i] = 3 + Math.random();
+    state.points.geometry.attributes.size.needsUpdate = true;
+  }
+}
+
+let rotAngle = 0;
+let cameraDist = 5;
+function animate() {
+  requestAnimationFrame(animate);
+  if (state.isRotating && state.points) {
+    rotAngle += 0.003;
+    state.camera.position.x = Math.sin(rotAngle) * cameraDist;
+    state.camera.position.y = Math.sin(rotAngle * 0.3) * 1.5;
+    state.camera.position.z = Math.cos(rotAngle) * cameraDist;
+    state.camera.lookAt(0, 0, 0);
+  }
+  state.renderer.render(state.scene, state.camera);
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  cameraDist = Math.max(1, Math.min(30, cameraDist + e.deltaY * 0.005));
+}
+
+// ──────────────────────────────────────────────
+// Init
+// ──────────────────────────────────────────────
+try {
+  // Check for existing session via verifylogin (optional)
+  // If token stored in localStorage, restore it
+  const saved = localStorage.getItem('textualize_session');
+  if (saved) {
+    try {
+      const s = JSON.parse(saved);
+      if (s.token && s.userId) {
+        state.token = s.token;
+        state.userId = s.userId;
+        state.userName = s.userName;
+        goToStep('createset');
+        loadTextSets();
+      }
+    } catch(e) { localStorage.removeItem('textualize_session'); }
+  }
+
+  // Save session on login
+  const origDoLogin = doLogin;
+  doLogin = async function() {
+    await origDoLogin();
+    if (state.token) {
+      try { localStorage.setItem('textualize_session', JSON.stringify({ token: state.token, userId: state.userId, userName: state.userName })); } catch(e) {}
+    }
+  };
+} catch (e) {
+  console.error('Init error:', e);
+}
+goToStep('register');
+
+// ──────────────────────────────────────────────
+// Rotating 3D particle background
+// ──────────────────────────────────────────────
+(function initBackground() {
+  const canvas = document.getElementById('bg-canvas');
+  if (!canvas) return;
+
+  const start = () => {
+    if (!window.THREE) {
+      canvas.style.display = 'none';
+      return;
+    }
+
+    const palette = [0x6366f1, 0x22d3ee, 0x22c55e, 0xeab308, 0x818cf8, 0x8b5cf6];
+    const COUNT = 1000;
+    const positions = new Float32Array(COUNT * 3);
+    const colors = new Float32Array(COUNT * 3);
+    const sizes = new Float32Array(COUNT);
+    const speeds = new Float32Array(COUNT);
+
+    const cBase = new THREE.Color();
+    for (let i = 0; i < COUNT; i++) {
+      let x = Math.random() * 2 - 1;
+      let y = Math.random() * 2 - 1;
+      let z = Math.random() * 2 - 1;
+      const len = Math.sqrt(x * x + y * y + z * z) || 1;
+      const rad = 5 + Math.cbrt(Math.random()) * 42;
+      positions[i * 3] = (x / len) * rad;
+      positions[i * 3 + 1] = (y / len) * rad * 0.7;
+      positions[i * 3 + 2] = (z / len) * rad;
+
+      cBase.setHex(palette[Math.floor(Math.random() * palette.length)]);
+      cBase.offsetHSL((Math.random() - 0.5) * 0.03, 0, (Math.random() - 0.5) * 0.25);
+      colors[i * 3] = cBase.r;
+      colors[i * 3 + 1] = cBase.g;
+      colors[i * 3 + 2] = cBase.b;
+
+      sizes[i] = 0.4 + Math.random() * 1.6;
+      speeds[i] = 0.05 + Math.random() * 0.25;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    const mat = new THREE.PointsMaterial({
+      size: 0.55,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.75,
+      sizeAttenuation: true,
+      depthWrite: false,
+    });
+
+    const points = new THREE.Points(geo, mat);
+    const scene = new THREE.Scene();
+    scene.add(points);
+
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 300);
+    camera.position.z = 46;
+
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 0);
+
+    let angle = 0;
+    let tilt = 0;
+    let raf = null;
+    let ticking = false;
+
+    const frame = () => {
+      if (ticking) return;
+      ticking = true;
+      raf = requestAnimationFrame(() => {
+        ticking = false;
+        angle += 0.0016;
+        tilt = Math.sin(angle * 0.4) * 0.12;
+        points.rotation.y = angle;
+        points.rotation.x = tilt;
+        points.rotation.z = Math.sin(angle * 0.2) * 0.04;
+        camera.position.x = Math.sin(angle * 0.1) * 3.5;
+        camera.position.y = Math.cos(angle * 0.16) * 2;
+        camera.lookAt(0, 0, 0);
+        renderer.render(scene, camera);
+      });
+    };
+    frame();
+
+    const onResize = () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+    };
+    window.addEventListener('resize', onResize);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        cancelAnimationFrame(raf);
+        raf = null;
+      } else if (!raf) {
+        frame();
+      }
+    });
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+</script>
+</body>
+</html>

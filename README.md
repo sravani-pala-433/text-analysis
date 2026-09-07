@@ -66,6 +66,43 @@ docker compose up --build
 # served at http://localhost:7000/
 ```
 
+## Deployment
+
+> **Vercel cannot host this backend.** It bundles all Python dependencies
+> (including the ~2.5 GB `sentence-transformers`/PyTorch stack) into a
+> serverless function, which blows past Vercel's size limits. The app also
+> needs a long-running watchdog process and a writable disk for model caching,
+> which serverless functions don't provide.
+
+The supported setup splits the app in two:
+
+| Component | Host | What it runs |
+|---|---|---|
+| Backend (FastAPI + ML) | **Render** (or Railway / Fly.io) | Docker image from `Dockerfile` |
+| Frontend (`static/`) | **Vercel** | Static Vite build |
+
+### Backend → Render
+
+1. Push the repo to GitHub (make sure `static/`, `package.json`, and `render.yaml` are committed — `.gitignore` no longer excludes them).
+2. In Render → New → Blueprint, point it at the repo. It uses `render.yaml` (Docker runtime, 5GB disk mounted at `/var/data` for uploads/model cache).
+3. Set these env vars in the Render dashboard:
+   - `DATABASE_URL` (Postgres with the `pgvector` extension — e.g. Neon)
+   - `SECRET_KEY`
+4. Note the service URL, e.g. `https://textualize-backend.onrender.com`.
+
+### Frontend → Vercel
+
+1. In Vercel, import the same GitHub repo. `vercel.json` forces the **Vite** framework with `npm run build` → output `dist`, so the Python files at the root don't confuse the detector.
+2. **No zero-config backend deployment** — Vercel only serves the static UI.
+3. Add a build-time environment variable in Vercel:
+   - `VITE_API_BASE=https://textualize-backend.onrender.com`
+   The URL is injected into the page during `vite build`, so the UI calls your Render backend instead of the same origin.
+4. CORS is already open (`allow_origins=["*"]`), so cross-origin API calls work.
+
+During local development the frontend falls back to the same origin
+(`window.location.origin`), so `npm run dev` (with the `/api` proxy) or simply
+serving `static/` from FastAPI keeps working unchanged.
+
 ## Demo flow
 
 The UI at `/` walks through the whole pipeline as a 5-step wizard.
