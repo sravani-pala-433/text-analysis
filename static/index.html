@@ -287,7 +287,7 @@
 <div class="steps-bar" id="steps-bar" style="display:none">
   <div class="step-pill" data-step="register"><span class="num">1</span>Register</div>
   <div class="step-connector"></div>
-  <div class="step-pill" data-step="createset"><span class="num">2</span>Create TextSet</div>
+  <div class="step-pill" data-step="createset"><span class="num">2</span>TextSets</div>
   <div class="step-connector"></div>
   <div class="step-pill" data-step="upload"><span class="num">3</span>Upload File</div>
   <div class="step-connector"></div>
@@ -349,11 +349,26 @@
     </div>
   </div>
 
-  <!-- STEP 1: Create TextSet -->
+  <!-- STEP 1: TextSets list + create -->
   <div class="panel" id="panel-createset">
-    <h2>Create TextSet</h2>
-    <p class="subtitle">A TextSet is a collection of text documents you want to analyze</p>
+    <h2>Your TextSets</h2>
+    <p class="subtitle">Pick an existing TextSet to continue, or create a new one</p>
     <div id="alert-createset" class="alert"></div>
+
+    <div id="textset-list">
+      <div style="text-align:center;padding:24px;color:var(--text-dim)">
+        <div class="spinner" style="width:32px;height:32px;border-width:2px"></div>
+        <p style="font-size:13px;margin-top:12px">Loading your TextSets...</p>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-success" onclick="selectTextSetForUpload('')">⟳ Refresh list</button>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:24px 0" />
+
+    <h3 style="font-size:15px;margin-bottom:16px">Create a new TextSet</h3>
     <div class="form-grid">
       <div>
         <label>Title</label>
@@ -540,15 +555,29 @@ async function goToStep(step) {
     document.getElementById('user-display').textContent = state.userName || state.userId;
   }
 
-  // Lazy-load visualization when arriving at that step
-  if (step === 'visualize' && state.token) {
-    if (!state.textSets.length) await loadTextSets();
-    const sel = document.getElementById('viz-ts-select');
-    if (!sel.value && state.textSets.length) {
-      sel.value = state.textSets[0].id;
-    }
-    if (sel.value && state.selectedTextSetId !== sel.value) {
-      loadVisualization();
+  // Lazy-load on arrival
+  if (state.token) {
+    if (step === 'createset') {
+      await loadTextSets();
+      renderTextSetList();
+    } else if (step === 'upload') {
+      await loadTextSets();
+      populateTextSetSelects();
+      // preserve the selected set if there is one
+      if (state.selectedTextSetId) {
+        const sel = document.getElementById('upload-ts-select');
+        if (sel) sel.value = state.selectedTextSetId;
+      }
+      updateUploadButton();
+    } else if (step === 'visualize') {
+      await loadTextSets();
+      const sel = document.getElementById('viz-ts-select');
+      if (!sel.value && state.textSets.length) {
+        sel.value = state.textSets[0].id;
+      }
+      if (sel.value && state.selectedTextSetId !== sel.value) {
+        loadVisualization();
+      }
     }
   }
 }
@@ -613,13 +642,46 @@ async function loadTextSets() {
     const d = await r.json();
     state.textSets = d.items || [];
     populateTextSetSelects();
+    renderTextSetList();
   } catch(e) { console.error(e); }
+}
+
+function renderTextSetList() {
+  const container = document.getElementById('textset-list');
+  if (!container) return;
+  if (!state.textSets.length) {
+    container.innerHTML = `
+      <div style="text-align:center;padding:32px;color:var(--text-dim)">
+        <p style="font-size:32px;margin-bottom:12px">🗂️</p>
+        <p style="font-size:14px;margin-bottom:8px">You don't have any TextSets yet.</p>
+        <p style="font-size:12px">Create one below, then upload a file to populate it.</p>
+      </div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="card-grid">
+      ${state.textSets.map(ts => `
+        <div class="card ${ts.id === state.selectedTextSetId ? 'selected' : ''}" onclick="selectTextSetForUpload('${ts.id}')">
+          <h4>${escapeHtml(ts.title)}</h4>
+          <p>${escapeHtml(ts.description || 'No description')}</p>
+          <div class="meta">
+            <span>📄 ${ts.entry_count || 0} items</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = String(str);
+  return div.innerHTML;
 }
 
 function populateTextSetSelects() {
   const selects = ['upload-ts-select','viz-ts-select'];
   selects.forEach(id => {
     const sel = document.getElementById(id);
+    if (!sel) return;
     const current = sel.value;
     sel.innerHTML = '<option value="">— Select a TextSet —</option>';
     state.textSets.forEach(ts => {
@@ -632,6 +694,13 @@ function populateTextSetSelects() {
   });
 }
 
+function selectTextSetForUpload(id) {
+  if (id) {
+    state.selectedTextSetId = id;
+  }
+  goToStep('upload');
+}
+
 async function createTextSet() {
   const title = document.getElementById('ts-title').value.trim();
   const description = document.getElementById('ts-desc').value.trim();
@@ -641,10 +710,11 @@ async function createTextSet() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || 'Failed to create TextSet');
     showAlert('alert-createset','success','TextSet created!');
-    await loadTextSets();
+    state.selectedTextSetId = d.id;
     document.getElementById('ts-title').value = '';
     document.getElementById('ts-desc').value = '';
-    setTimeout(() => goToStep('upload'), 600);
+    await loadTextSets();
+    setTimeout(() => goToStep('upload'), 400);
   } catch(e) { showAlert('alert-createset','error', e.message); }
 }
 
@@ -773,7 +843,10 @@ function pollProcessing() {
       document.getElementById('processing-detail').textContent = `Attempt ${attempts} — ${count} items found`;
       if (count > 0) {
         clearInterval(pollInterval);
+        pollInterval = null;
         showAlert('alert-processing','success', `Processing complete! ${count} items ready.`);
+        // Refresh the TextSet entry count so it's current
+        loadTextSets();
         setTimeout(() => goToStep('visualize'), 1000);
       }
     } catch(e) { /* keep polling */ }
@@ -785,7 +858,8 @@ function pollProcessing() {
 }
 
 function skipProcessing() {
-  if (pollInterval) clearInterval(pollInterval);
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+  loadTextSets();
   goToStep('visualize');
 }
 
@@ -1152,8 +1226,8 @@ function onWheel(e) {
 // ──────────────────────────────────────────────
 // Init
 // ──────────────────────────────────────────────
+let restoredSession = false;
 try {
-  // Check for existing session via verifylogin (optional)
   // If token stored in localStorage, restore it
   const saved = localStorage.getItem('textualize_session');
   if (saved) {
@@ -1163,8 +1237,8 @@ try {
         state.token = s.token;
         state.userId = s.userId;
         state.userName = s.userName;
+        restoredSession = true;
         goToStep('createset');
-        loadTextSets();
       }
     } catch(e) { localStorage.removeItem('textualize_session'); }
   }
@@ -1180,7 +1254,11 @@ try {
 } catch (e) {
   console.error('Init error:', e);
 }
-goToStep('register');
+
+// Only default to the register page when there is no restored session
+if (!restoredSession) {
+  goToStep('register');
+}
 
 // ──────────────────────────────────────────────
 // Rotating 3D particle background

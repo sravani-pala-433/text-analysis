@@ -9,12 +9,12 @@ httpx
 python-multipart
 python-dotenv
 pytest
-httpx
 passlib~=1.7.4
 psycopg2-binary
 pandas==2.2.3
 numpy===1.26.4
-sentence_transformers
+fastembed~=0.5.0
+scikit-learn~=1.5.2
 openpyxl
 pgvector~=0.3.6
 psutil

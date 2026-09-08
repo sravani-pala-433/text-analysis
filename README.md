@@ -17,7 +17,7 @@ A FastAPI-powered text analytics service that ingests spreadsheet data, generate
 | API | FastAPI + Uvicorn |
 | ORM / migrations | SQLAlchemy 2.x + Alembic |
 | Database | PostgreSQL with the `pgvector` extension |
-| Embeddings | `sentence-transformers` (`all-MiniLM-L6-v2`), PCA via `scikit-learn` |
+| Embeddings | `fastembed` (ONNX Runtime) — `all-MiniLM-L6-v2`, PCA via `scikit-learn` |
 | Auth | JWT (HS256, 1h expiry), Argon2 password hashing |
 | File ingestion | Watchdog observer + pandas / openpyxl |
 | Frontend | Single-page HTML/JS + Three.js (3D), SheetJS (sample file) |
@@ -68,11 +68,14 @@ docker compose up --build
 
 ## Deployment
 
-> **Vercel cannot host this backend.** It bundles all Python dependencies
-> (including the ~2.5 GB `sentence-transformers`/PyTorch stack) into a
-> serverless function, which blows past Vercel's size limits. The app also
+> **Vercel cannot host this backend.** It bundles all Python dependencies into
+> a serverless function, which blows past Vercel's size limits. The app also
 > needs a long-running watchdog process and a writable disk for model caching,
 > which serverless functions don't provide.
+>
+> Note: embeddings now use **`fastembed` (ONNX Runtime)** instead of
+> PyTorch/sentence-transformers. The image is ~150 MB and peak RAM is ~300 MB,
+> so even 512 MB free-tier containers (Koyeb, SnapDeploy, etc.) can host it.
 
 The supported setup splits the app in two:
 
@@ -84,31 +87,53 @@ The supported setup splits the app in two:
 The `Dockerfile` now starts uvicorn on `$PORT` (default `7000`), so any
 platform that injects a `PORT` variable works.
 
-### Backend → Hugging Face Spaces (free, no card)
+### Backend → Render (free plan)
 
-1. Create a Space at https://huggingface.co/new-space configured with **Docker** as the SDK.
-2. Connect the Space's repository to your code (you can push the backend files directly to the Space's git repo, or fork/upload the project).
-3. Set the Space secrets (Settings → Variables and secrets):
-   - `DATABASE_URL` (Postgres with the `pgvector` extension — e.g. Neon free tier)
-   - `SECRET_KEY`
-   - `UPLOAD_FILE_DIR=/data`
-4. Deploy. HF builds the `Dockerfile` and exposes `https://<username>-<space-name>.hf.space/api/docs`.
-5. The first request after a cold start downloads the embedding model (~90 MB) and can be slow to wake the Space.
-
-### Backend → Render (paid, easier)
+Render still offers a **Free** web-service plan (750 hours/month, auto-deploy
+from GitHub, **no credit card required**). Docker image builds are supported.
 
 1. Push the repo to GitHub.
-2. Render → New → Blueprint → point at the repo (uses `render.yaml`, Docker runtime, 5 GB disk at `/var/data`).
-3. Set `DATABASE_URL`, `SECRET_KEY` (and `UPLOAD_FILE_DIR=/var/data`) in the dashboard.
+2. Render → New → Web Service → connect the repo. The project is auto-detected
+   as Docker (`Dockerfile` present).
+3. In the plan dropdown, choose **Free** ($0/month) — not the "Starter" tier,
+   which Selects paid by default.
+4. Set the environment variables:
+   - `DATABASE_URL` (Postgres with the `pgvector` extension — e.g. Neon free tier)
+   - `SECRET_KEY`
+5. Deploy and wait for the Docker build. URL looks like
+   `https://textualize-backend.onrender.com/api/docs`.
 
-### Backend → your own machine + tunnel (zero-cost, quickest)
+**Known free-tier behavior (fine for a demo):**
+- The service sleeps after ~15 minutes of inactivity and cold-starts in
+  30–60 s on the next request (the small ONNX model (~25 MB) re-downloads/caches on boot).
+- Ephemeral disk: uploaded files are processed in `/tmp` and moved to
+  `completed/`/`failed/` — nothing needs to survive a restart.
+- 750 instance-hours/month (~31 days of always-on, or less with wake-ups).
 
-If you just need a public URL for a demo, run the backend locally and expose it:
+> Failed on Render before? Make sure the plan is genuinely **Free** and that
+> `DATABASE_URL` / `SECRET_KEY` are set — the image build itself is free.
+
+### Local machine + tunnel (zero account, zero cost)
+
+Run the backend locally and expose it with Cloudflare's free tunnel:
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
-cloudflared tunnel --url http://localhost:8000   # gives a https://...trycloudflare.com URL
+$env:UPLOAD_FILE_DIR = "$PWD\data"   # writable local dir
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+# in a second terminal:
+cloudflared tunnel --url http://localhost:8000
 ```
+
+Cloudflared prints a public `https://...trycloudflare.com` URL to use as the
+frontend's `VITE_API_BASE`. No account, no card, no build. The URL changes each
+run — fine for a one-off demo. Download the binary from
+https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+
+#### Other paid hosts (if you'd rather not babysit a laptop)
+
+Deploy the same `Dockerfile` to **Railway**, **Fly.io**, or the Render paid
+plans (~$5–7/month). `render.yaml` (Docker runtime + 5 GB disk) is included for
+Render Blueprint deploys.
 
 ### Frontend → Vercel
 
@@ -221,4 +246,5 @@ All API routes require a `Bearer` JWT except `signup`, `login`, and `swaggerlogi
 └── tokenizer/
     └── embedings.py              # sentence embeddings + PCA reduction
 ```
+
 
