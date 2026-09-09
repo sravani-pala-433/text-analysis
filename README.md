@@ -82,7 +82,7 @@ The supported setup splits the app in two:
 | Component | Host | What it runs |
 |---|---|---|
 | Backend (FastAPI + ML) | A Docker host (HF Spaces / Render / Railway / Fly.io) | Docker image from `Dockerfile` |
-| Frontend (`static/`) | **Vercel** | Static Vite build |
+| Frontend (`frontend/`) | **Vercel** | Static Vite build |
 
 The `Dockerfile` now starts uvicorn on `$PORT` (default `7000`), so any
 platform that injects a `PORT` variable works.
@@ -137,16 +137,32 @@ Render Blueprint deploys.
 
 ### Frontend → Vercel
 
-1. In Vercel, import the same GitHub repo. `vercel.json` forces the **Vite** framework with `npm run build` → output `dist`, so the Python files at the root don't confuse the detector.
-2. **No zero-config backend deployment** — Vercel only serves the static UI.
-3. Add a build-time environment variable in Vercel:
-   - `VITE_API_BASE=https://your-backend-url` (your HF Space / Render / tunnel URL)
-   The URL is injected into the page during `vite build`, so the UI calls your backend instead of the same origin.
-4. CORS is already open (`allow_origins=["*"]`), so cross-origin API calls work.
+The frontend lives in its own `frontend/` folder, isolated from the Python
+backend. This is what stops Vercel from detecting the repo as a Python project
+(which previously caused the `fastembed`/`numpy` install failure).
 
-During local development the frontend falls back to the same origin
-(`window.location.origin`), so `npm run dev` (with the `/api` proxy) or simply
-serving `static/` from FastAPI keeps working unchanged.
+1. In Vercel, import the GitHub repo.
+2. **Set the Root Directory to `frontend`.** This is critical — Vercel then
+   only sees the Vite/Node project and never touches `requirements.txt`.
+3. Framework should auto-detect as **Vite** (`vercel.json` is inside `frontend/`
+   and forces `npm run build` → output `dist`).
+4. Add a build-time environment variable:
+   - `VITE_API_BASE=https://your-backend-url` (your Render / tunnel / VPS URL)
+   The URL is injected into the page during `vite build`, so the UI calls your
+   backend instead of the same origin.
+5. CORS is already open (`allow_origins=["*"]`), so cross-origin API calls work.
+
+Frontend changes are developed from the `frontend/` directory:
+
+```bash
+cd frontend
+npm install
+npm run dev          # serves the UI, proxies /api to localhost:8000
+```
+
+For local/serverless-free dev you can keep serving the same `frontend/index.html`
+from FastAPI (`GET /` reads it and falls back to `PUBLIC_HTML_URL`). When
+deployed to Vercel with `VITE_API_BASE` set, the UI talks to your remote backend.
 
 ## Demo flow
 
@@ -224,15 +240,18 @@ All API routes require a `Bearer` JWT except `signup`, `login`, and `swaggerlogi
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/` , `/index.html` | Serve the demo UI (local `static/index.html`, falling back to `PUBLIC_HTML_URL`) |
+| GET | `/` , `/index.html` | Serve the demo UI (local `frontend/index.html`, falling back to `PUBLIC_HTML_URL`) |
 
 ## Project structure
 
 ```
 .
 ├── main.py                       # FastAPI app, lifespan (file observer), routers
-├── static/
-│   └── index.html                # Demo UI (single page, 3D visualization)
+├── frontend/                     # Demo UI (Vercel Root Directory = frontend/)
+│   ├── index.html                # Single-page app, 3D visualization
+│   ├── package.json              # Vite build (npm run build)
+│   ├── vite.config.js            # injects VITE_API_BASE at build time, /api proxy
+│   └── vercel.json               # framework: vite, output: dist
 ├── textAnalysisService/
 │   ├── auth/
 │   │   ├── config/               # settings, DB engine, logging

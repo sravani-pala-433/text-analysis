@@ -52,6 +52,8 @@ docker-compose.override.yml
 Thumbs.db
 
 # Node / frontend build artifacts
+frontend/node_modules/
+frontend/dist/
 node_modules/
 dist/
 

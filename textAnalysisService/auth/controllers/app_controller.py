@@ -13,7 +13,7 @@ user_service = UserService()
 
 logger = logging.getLogger(__name__)
 
-LOCAL_HTML_FILE = Path(__file__).resolve().parents[3] / "static" / "index.html"
+LOCAL_HTML_FILE = Path(__file__).resolve().parents[3] / "frontend" / "index.html"
 
 
 def _get_html_content() -> str:

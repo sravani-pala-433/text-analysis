@@ -1,6 +1,4 @@
 import { defineConfig } from 'vite';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 
 function injectApiBase() {
   let apiBase = '';
@@ -20,10 +18,9 @@ function injectApiBase() {
 }
 
 export default defineConfig({
-  root: 'static',
   plugins: [injectApiBase()],
   build: {
-    outDir: '../dist',
+    outDir: 'dist',
     emptyOutDir: true,
   },
   server: {
